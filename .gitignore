@@ -6,3 +6,4 @@ gpio_test
 build*
 .vscode
 *.user
+compile_flags.txt 
