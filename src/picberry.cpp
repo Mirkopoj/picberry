@@ -250,6 +250,8 @@ int main(int argc, char *argv[])
             pic = new pic24fjxxxga0xx();
         else if(strcmp(family,"pic24fjxxxga3xx") == 0)
             pic = new pic24fjxxxga3xx();
+        else if(strcmp(family,"pic24fjxxxgl3xx") == 0)
+            pic = new pic24fjxxxgl3xx();
         else if(strcmp(family,"pic24fjxxga1xx") == 0)
             pic = new pic24fjxxga1xx_gb0xx();
         else if(strcmp(family,"pic24fjxxgb0xx") == 0)
@@ -262,9 +264,9 @@ int main(int argc, char *argv[])
             pic = new pic24fjxxxga1_gb1();
         else if(strcmp(family,"pic24fjxxxgb2xx") == 0)
             pic = new pic24fjxxxga2_gb2();
-	else if(strcmp(family,"pic24fxxka1xx") == 0)
-            pic = new pic24fxxka1xx();
-	else if(strcmp(family,"pic32mx1") == 0)
+        else if(strcmp(family,"pic24fxxka1xx") == 0)
+				pic = new pic24fxxka1xx();
+        else if(strcmp(family,"pic32mx1") == 0)
             pic = new pic32(SF_PIC32MX1);
         else if(strcmp(family,"pic32mx2") == 0)
             pic = new pic32(SF_PIC32MX2);
