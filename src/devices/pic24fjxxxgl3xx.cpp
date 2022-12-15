@@ -176,6 +176,7 @@ void pic24fjxxxgl3xx::enter_program_mode(void)
 	delay_us(DELAY_P19);
 	GPIO_SET(pic_mclr);
 	delay_us(DELAY_P7);
+	delay_us(DELAY_P1*5);
 
 	/*
 	 * Coming out of Reset, ther first 4-bit control code is always forced
@@ -389,23 +390,17 @@ void pic24fjxxxgl3xx::bulk_erase(void)
 	reset_pc();
 	send_nop();
 
-	/* Set the NVMCON to erase all program memory */
-	send_cmd(0x2404FA); // MOV #0x404F, W10
-	send_cmd(0x883B0A); // MOV W10, NVMCON
+	/* Configure the NVMCON register to perform a Chip Erase */
+	send_cmd(0x2400E0); // MOV #0x404F, W10
+	send_cmd(0x883B00); // MOV W10, NVMCON
 
-	/*
-	 * Set TBLPAG and perform dummy table write to select what portions
-	 * of memory are erased.
-	 */
-	send_cmd(0x200000); // MOV #<PAGEVAL>, W0
-	send_cmd(0x8802A0); // MOV W0, TBLPAG
-	send_cmd(0x200000); // MOV #0x0000, W0
-	send_cmd(0xBB0800); // TBLWTL W0,[W0]
-	send_nop();
-	send_nop();
-
-	/* Initiate the erase cycle */
+	/* Set the WR bit. */
+	send_cmd(0x200550); // MOV #0x55, W0
+	send_cmd(0x883B30); // MOV W0, NVMKEY
+	send_cmd(0x200AA0); // MOV #0xAA, W0
+	send_cmd(0x883B30); // MOV W0, NVMKEY
 	send_cmd(0xA8E761); // BSET NVMCON, #WR
+	send_nop();
 	send_nop();
 	send_nop();
 
@@ -416,11 +411,16 @@ void pic24fjxxxgl3xx::bulk_erase(void)
 		reset_pc();
 		send_nop();
 		send_cmd(0x803B02); // MOV NVMCON, W2
+		send_nop();
 		send_cmd(0x883C22); // MOV W2, VISI
 		send_nop();
 		nvmcon = read_data(); // Clock out contents of the VISI register
 		send_nop();
 	} while((nvmcon & 0x8000) == 0x8000);
+
+	/* Clear the WREN bit. */
+	send_cmd(0x200000); // MOV #0000, W0
+	send_cmd(0x883B00); // MOV W0, NVMCON
 
 	if(flags.client)
 		fprintf(stdout, "@FIN");
@@ -605,9 +605,9 @@ void pic24fjxxxgl3xx::write(char *infile)
 	reset_pc();
 	send_nop();
 
-	/* Set the NVMCON to program 64 instruction words */
-	send_cmd(0x24001A); // MOV #0x4001, W10
-	send_cmd(0x883B0A); // MOV W10, NVMCON
+	/* Set the NVMCON to program 128 instruction words */
+	send_cmd(0x240020); // MOV #0x4002, W0
+	send_cmd(0x883B00); // MOV W10, NVMCON
 
 	if (!flags.debug) cerr << "[ 0%]";
 	if (flags.client) fprintf(stdout, "@000");
@@ -626,12 +626,11 @@ void pic24fjxxxgl3xx::write(char *infile)
 			continue;
 		}
 
-		/* Initialize the Write Pointer (W7) for TBLWT instruction */
-		send_cmd(0x200000 | ((addr & 0x00FF0000) >> 12) ); // MOV #<DestinationAddress23:16>, W0
-		send_cmd(0x8802A0);
-		send_cmd(0x200007 | ((addr & 0x0000FFFF) << 4) ); // MOV #<DestinationAddress15:0>, W7
+		/* Initialize the TBLPAG register for writing to the latches */
+		send_cmd(0x200FAC); // MOV #0xFA, W12
+		send_cmd(0x8802AC); // MOV W12, TBLPAG
 
-		for (p = 0; p < 16; p++) {
+		for (p = 0; p < 32; p++) {
 			for (j = 0; j < 8; j++) {
 				if (mem.filled[addr + j])
 					data[j] = mem.location[addr + j];
@@ -641,6 +640,7 @@ void pic24fjxxxgl3xx::write(char *infile)
 					fprintf(stderr,"\n  Writing 0x%04X to address 0x%06X ", data[j], addr + j);
 			}
 
+			/*  Load W0:W5 with the next 4 instruction words to program. */
 			send_cmd(0x200000 | (data[0] << 4)); // MOV #<LSW0>, W0
 			send_cmd(0x200001 | (0x00FFFF & ((data[3] << 8) | (data[1] & 0x00FF))) <<4); // MOV #<MSB1:MSB0>, W1
 			send_cmd(0x200002 | (data[2] << 4)); // MOV #<LSW1>, W2
@@ -650,6 +650,8 @@ void pic24fjxxxgl3xx::write(char *infile)
 
 			/* Set the Read Pointer (W6) and load the (next set of) write latches */
 			send_cmd(0xEB0300); // CLR W6
+			send_nop();
+			send_cmd(0xEB0380); // CLR W7
 			send_nop();
 			send_cmd(0xBB0BB6); // TBLWTL [W6++], [W7]
 			send_nop();
@@ -679,8 +681,20 @@ void pic24fjxxxgl3xx::write(char *infile)
 			addr = addr + 8;
 		}
 
-		/* Initiate the write cycle */
+		/* Set the NVMADR/NVMADRU register pair to point to the correct address */
+		send_cmd(0x200003 | ((addr & 0x0000FFFF) << 4) ); // MOV #<DestinationAddress15:0>, W3
+		send_cmd(0x200004 | ((addr & 0x00FF0000) >> 12) ); // MOV #<DestinationAddress23:16>, W4
+		send_cmd(0x883B13); // MOV W3, NVMADR
+		send_cmd(0x883B24); // MOV W4, NVMADRU
+								  
+
+		/*  Execute the WR bit unlock sequence and initiate the write cycle */
+		send_cmd(0x200550); // MOV #0x55, W0
+		send_cmd(0x883B30); // MOV W0, NVMKEY
+		send_cmd(0x200AA0); // MOV #0xAA, W0
+		send_cmd(0x883B30); // MOV W0, NVMKEY
 		send_cmd(0xA8E761); // BSET NVMCON, #WR
+		send_nop();
 		send_nop();
 		send_nop();
 
@@ -699,6 +713,10 @@ void pic24fjxxxgl3xx::write(char *infile)
 
 		reset_pc();
 		send_nop();
+
+		/* Clear the WREN bit */
+		send_cmd(0x200000); // MOV #0000, W0
+		send_cmd(0x883B00 ); // MOV W0, NVMCON
 
 		if (counter != addr * 100 / filled_locations) {
 			if (flags.client)
@@ -723,58 +741,69 @@ void pic24fjxxxgl3xx::write(char *infile)
 	reset_pc();
 	send_nop();
 
-	/*
-	 * The last four implemented program memory locations are reserved for the
-	 * device Configuration registers
-	 *
-	 * +-----------------+---------+---------+---------+---------+
-	 * |   Device        |   CW1   |   CW2   |   CW3   |   CW4   |
-	 * +-----------------+---------+---------+---------+---------+
-	 * | PIC24FJ64GA3xx  | 00ABFEh | 00ABFCh | 00ABFAh | 00ABF8h |
-	 * +-------------------------------------+---------+---------+
-	 */
 	addr = mem.code_memory_size;
 
-	/* Initialize the Write Pointer (W7) for TBLWT instruction */
-
-	/* Set the NVMCON to program 1 instruction word */
-	send_cmd(0x24003A); // MOV #0x4003, W10
-	send_cmd(0x883B0A); // MOV W10, NVMCON
+	/* Initialize the TBLPAG register for writing to the latches. */ 
+	send_cmd(0x200FAC); // MOV #0xFA, W12
+	send_cmd(0x8802AC); // MOV W12, TBLPAG
 
 	for (i = 0; i < 4; i++) {
 		if (mem.filled[addr]) {
-			/* Initialize the Write Pointer (W7) for TBLWT instruction */
-			send_cmd(0x200000 | ((addr & 0x00FF0000) >> 12) ); // MOV #<CWxAddress23:16>, W0
-			send_cmd(0x8802A0);
-			send_cmd(0x200007 | ((addr & 0x0000FFFF) << 4) ); // MOV #<CWxAddress15:0>, W7
 
-			/* Load the Configuration register data to W6 */
-			send_cmd(0x200006 | ((0x0000FFFF & mem.location[addr]) << 4));
+			send_cmd(0x200000 | ((0x0000FFFF & mem.location[addr]) << 4)); // MOV #<Config lower word data>, W0
+			send_cmd(0x2FF001 | ((0x00FF0000 & mem.location[addr]) >> 12)); // MOV #<Config upper word data>, W1
+			send_cmd(0x2FFFF2); // MOV #0xFFFF, W2
 
-			/*
-			 * Write the Configuration register data to the write
-			 * latch and increment the Write Pointer
-			 */
+			/* Set the Read Pointer (W6) and Write Pointer (W7), and load the (next set of) write latches */
+			send_cmd(0xEB0300); // CLR W6
 			send_nop();
-			send_cmd(0xBB1B86); // TBLWTL W6, [W7++]
+			send_cmd(0xEB0380); // CLR W7
 			send_nop();
+			send_cmd(0xBB0BB6); // TBLWTL [W6++], [W7]
+			send_nop();
+			send_nop();
+			send_cmd(0xBBDBB6); // TBLWTH.B [W6++], [W7++]
+			send_nop();
+			send_nop();
+			send_cmd(0xBBEBB6); // TBLWTH.B [W6++], [++W7]
+			send_nop();
+			send_nop();
+			send_cmd(0xBB1BB6); // TBLWTL.W [W6++], [W7++] 
+			send_nop();
+			send_nop();
+
+			/* Set the NVMADR/NVMADRU register pair to point to the correct address */
+			send_cmd(0x200003 | ((addr & 0x0000FFFF) << 4)); // MOV #DestinationAddress<15:0>, W3
+			send_cmd(0x200004 | ((addr & 0x00FF0000) >> 12)); // MOV #DestinationAddress<23:16>, W4
+			send_cmd(0x883B13); // MOV W3, NVMADR
+			send_cmd(0x883B24); // MOV W4, NVMADRU
+
+			/* Set the NVMCON register to program two instruction words */
+			send_cmd(0x24001A); // MOV #0x4001, W10
+			send_cmd(0x883B0A); // MOV W10, NVMCON
 			send_nop();
 
 			/* Initiate the write cycle */
-			send_cmd(0xA8E761);
+			send_cmd(0x200551); // MOV #0x55, W1
+			send_cmd(0x883B31); // MOV W1, NVMKEY
+			send_cmd(0x200AA1); // MOV #0xAA, W1
+			send_cmd(0x883B31); // MOV W1, NVMKEY
+			send_cmd(0xA8E761); // BSET NVMCON, #WR
 			send_nop();
 			send_nop();
+			reset_pc();
+			send_nop();
 
-			delay_us(DELAY_P20);
+			delay_us(DELAY_P9B);
 
-			/* Wait while the erase operation completes */
+			/*  Wait for program operation to complete and make sure the WR bit is clear */
 			do {
-				reset_pc();
-				send_nop();
-				send_cmd(0x803B02); // MOV NVMCON, W2
-				send_cmd(0x883C22); // MOV W2, VISI
+				send_cmd(0x803B00); // MOV NVMCON, W0
+				send_cmd(0x883C20); // MOV W0, VISI
 				send_nop();
 				nvmcon = read_data(); // Clock out contents of the VISI register
+				send_nop();
+				reset_pc();
 				send_nop();
 			} while ((nvmcon & 0x8000) == 0x8000);
 
@@ -787,6 +816,9 @@ void pic24fjxxxgl3xx::write(char *infile)
 
 		addr = addr + 2;
 	}
+
+	send_cmd(0x200000); // MOV #0000, W0
+	send_cmd(0x883B00); // MOV W0, NVMCON
 
 	if (flags.debug) cerr << endl;
 
