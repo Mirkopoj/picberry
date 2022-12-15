@@ -46,6 +46,7 @@
 #include "devices/pic18fj.h"
 #include "devices/pic24fjxxxga0xx.h"
 #include "devices/pic24fjxxxga3xx.h"
+#include "devices/pic24fjxxxgl3xx.h"
 #include "devices/pic24fjxxga1xx_gb0xx.h"
 #include "devices/pic32.h"
 #include "devices/pic24fjxxxga1_gb1.h"
@@ -283,6 +284,7 @@ int main(int argc, char *argv[])
                  << "- pic24fj" << endl
                  << "- pic24fjxxxga0xx" << endl
                  << "- pic24fjxxxga3xx" << endl
+                 << "- pic24fjxxxgl3xx" << endl
                  << "- pic24fjxxga1xx" << endl
                  << "- pic24fjxxgb0xx" << endl 
                  << "- pic24fjxxxga1xx" << endl
@@ -485,6 +487,7 @@ void usage(void)
             "       pic24fj     \n"
             "       pic24fjxxxga0xx \n"
             "       pic24fjxxxga3xx \n"
+            "       pic24fjxxxgl3xx \n"
             "       pic24fjxxga1xx \n"
             "       pic24fjxxgb0xx \n"
             "       pic24fjxxxga1xx \n"
